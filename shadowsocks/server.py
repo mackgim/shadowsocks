@@ -1,204 +1,143 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright 2015 clowwindy
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
 
-# Copyright (c) 2013 clowwindy
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+from __future__ import absolute_import, division, print_function, \
+    with_statement
 
-from __future__ import with_statement
 import sys
-if sys.version_info < (2, 6):
-    import simplejson as json
-else:
-    import json
-
-try:
-    import gevent
-    import gevent.monkey
-    gevent.monkey.patch_all(dns=gevent.version_info[0] >= 1)
-except ImportError:
-    gevent = None
-    print >>sys.stderr, 'warning: gevent not found, using threading instead'
-
-import socket
-import select
-import threading
-import SocketServer
-import struct
 import os
 import logging
-import getopt
-import encrypt
-import utils
+import signal
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
+from shadowsocks import shell, daemon, eventloop, tcprelay, udprelay, \
+    asyncdns, manager
 
-def send_all(sock, data):
-    bytes_sent = 0
-    while True:
-        r = sock.send(data[bytes_sent:])
-        if r < 0:
-            return r
-        bytes_sent += r
-        if bytes_sent == len(data):
-            return bytes_sent
-
-
-class ThreadingTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
-    allow_reuse_address = True
-
-
-class Socks5Server(SocketServer.StreamRequestHandler):
-    def handle_tcp(self, sock, remote):
-        try:
-            fdset = [sock, remote]
-            while True:
-                r, w, e = select.select(fdset, [], [])
-                if sock in r:
-                    data = self.decrypt(sock.recv(4096))
-                    if len(data) <= 0:
-                        break
-                    result = send_all(remote, data)
-                    if result < len(data):
-                        raise Exception('failed to send all data')
-                if remote in r:
-                    data = self.encrypt(remote.recv(4096))
-                    if len(data) <= 0:
-                        break
-                    result = send_all(sock, data)
-                    if result < len(data):
-                        raise Exception('failed to send all data')
-
-        finally:
-            sock.close()
-            remote.close()
-
-    def encrypt(self, data):
-        return self.encryptor.encrypt(data)
-
-    def decrypt(self, data):
-        return self.encryptor.decrypt(data)
-
-    def handle(self):
-        try:
-            self.encryptor = encrypt.Encryptor(self.server.key, self.server.method)
-            sock = self.connection
-            iv_len = self.encryptor.iv_len()
-            if iv_len:
-                self.decrypt(sock.recv(iv_len))
-            addrtype = ord(self.decrypt(sock.recv(1)))
-            if addrtype == 1:
-                addr = socket.inet_ntoa(self.decrypt(self.rfile.read(4)))
-            elif addrtype == 3:
-                addr = self.decrypt(
-                    self.rfile.read(ord(self.decrypt(sock.recv(1)))))
-            elif addrtype == 4:
-                addr = socket.inet_ntop(socket.AF_INET6,
-                                        self.decrypt(self.rfile.read(16)))
-            else:
-                # not support
-                logging.warn('addr_type not support')
-                return
-            port = struct.unpack('>H', self.decrypt(self.rfile.read(2)))
-            try:
-                logging.info('connecting %s:%d' % (addr, port[0]))
-                remote = socket.create_connection((addr, port[0]))
-            except socket.error, e:
-                # Connection refused
-                logging.warn(e)
-                return
-            self.handle_tcp(sock, remote)
-        except socket.error, e:
-            logging.warn(e)
 
 def main():
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s %(levelname)-8s %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S', filemode='a+')
+    shell.check_python()
 
+    config = shell.get_config(False)
 
-    version = ''
-    try:
-        import pkg_resources
-        version = pkg_resources.get_distribution('shadowsocks').version
-    except:
-        pass
-    print 'shadowsocks %s' % version
+    daemon.daemon_exec(config)
 
-    KEY = None
-    METHOD = None
-    IPv6 = False
-
-    config_path = utils.find_config()
-    optlist, args = getopt.getopt(sys.argv[1:], 's:p:k:m:c:6')
-    for key, value in optlist:
-        if key == '-c':
-            config_path = value
-
-    if config_path:
-        with open(config_path, 'rb') as f:
-            config = json.load(f)
-        logging.info('loading config from %s' % config_path)
+    if config['port_password']:
+        if config['password']:
+            logging.warn('warning: port_password should not be used with '
+                         'server_port and password. server_port and password '
+                         'will be ignored')
     else:
-        config = {}
+        config['port_password'] = {}
+        server_port = config['server_port']
+        if type(server_port) == list:
+            for a_server_port in server_port:
+                config['port_password'][a_server_port] = config['password']
+        else:
+            config['port_password'][str(server_port)] = config['password']
 
-    optlist, args = getopt.getopt(sys.argv[1:], 's:p:k:m:c:6')
-    for key, value in optlist:
-        if key == '-p':
-            config['server_port'] = int(value)
-        elif key == '-k':
-            config['password'] = value
-        elif key == '-s':
-            config['server'] = value
-        elif key == '-m':
-            config['method'] = value
-        elif key == '-6':
-            IPv6 = True
+    if config.get('manager_address', 0):
+        logging.info('entering manager mode')
+        manager.run(config)
+        return
 
-    SERVER = config['server']
-    PORT = config['server_port']
-    KEY = config['password']
-    METHOD = config.get('method', None)
-    PORTPASSWORD = config.get('port_password', None)
-    TIMEOUT = config.get('timeout', 600)
+    tcp_servers = []
+    udp_servers = []
 
-    if not KEY and not config_path:
-        sys.exit('config not specified, please read https://github.com/clowwindy/shadowsocks')
-
-    utils.check_config(config)
-
-    if PORTPASSWORD:
-        if PORT or KEY:
-            logging.warn('warning: port_password should not be used with server_port and password. server_port and password will be ignored')
+    if 'dns_server' in config:  # allow override settings in resolv.conf
+        dns_resolver = asyncdns.DNSResolver(config['dns_server'],
+                                            config['prefer_ipv6'])
     else:
-        PORTPASSWORD = {}
-        PORTPASSWORD[str(PORT)] = KEY
+        dns_resolver = asyncdns.DNSResolver(prefer_ipv6=config['prefer_ipv6'])
 
-    encrypt.init_table(KEY, METHOD)
-    if IPv6:
-        ThreadingTCPServer.address_family = socket.AF_INET6
-    for port, key in PORTPASSWORD.items():
-        server = ThreadingTCPServer((SERVER, int(port)), Socks5Server)
-        server.key, server.method, server.timeout = key, METHOD, int(TIMEOUT)
-        logging.info("starting server at %s:%d" % tuple(server.server_address[:2]))
-        threading.Thread(target=server.serve_forever).start()
+    port_password = config['port_password']
+    del config['port_password']
+    for port, password in port_password.items():
+        a_config = config.copy()
+        a_config['server_port'] = int(port)
+        a_config['password'] = password
+        logging.info("starting server at %s:%d" %
+                     (a_config['server'], int(port)))
+        tcp_servers.append(tcprelay.TCPRelay(a_config, dns_resolver, False))
+        udp_servers.append(udprelay.UDPRelay(a_config, dns_resolver, False))
+
+    def run_server():
+        def child_handler(signum, _):
+            logging.warn('received SIGQUIT, doing graceful shutting down..')
+            list(map(lambda s: s.close(next_tick=True),
+                     tcp_servers + udp_servers))
+        signal.signal(getattr(signal, 'SIGQUIT', signal.SIGTERM),
+                      child_handler)
+
+        def int_handler(signum, _):
+            sys.exit(1)
+        signal.signal(signal.SIGINT, int_handler)
+
+        try:
+            loop = eventloop.EventLoop()
+            dns_resolver.add_to_loop(loop)
+            list(map(lambda s: s.add_to_loop(loop), tcp_servers + udp_servers))
+
+            daemon.set_user(config.get('user', None))
+            loop.run()
+        except Exception as e:
+            shell.print_exception(e)
+            sys.exit(1)
+
+    if int(config['workers']) > 1:
+        if os.name == 'posix':
+            children = []
+            is_child = False
+            for i in range(0, int(config['workers'])):
+                r = os.fork()
+                if r == 0:
+                    logging.info('worker started')
+                    is_child = True
+                    run_server()
+                    break
+                else:
+                    children.append(r)
+            if not is_child:
+                def handler(signum, _):
+                    for pid in children:
+                        try:
+                            os.kill(pid, signum)
+                            os.waitpid(pid, 0)
+                        except OSError:  # child may already exited
+                            pass
+                    sys.exit()
+                signal.signal(signal.SIGTERM, handler)
+                signal.signal(signal.SIGQUIT, handler)
+                signal.signal(signal.SIGINT, handler)
+
+                # master
+                for a_tcp_server in tcp_servers:
+                    a_tcp_server.close()
+                for a_udp_server in udp_servers:
+                    a_udp_server.close()
+                dns_resolver.close()
+
+                for child in children:
+                    os.waitpid(child, 0)
+        else:
+            logging.warn('worker is only available on Unix/Linux')
+            run_server()
+    else:
+        run_server()
+
 
 if __name__ == '__main__':
-    try:
-        main()
-    except socket.error, e:
-        logging.error(e)
+    main()

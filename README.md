@@ -1,126 +1,86 @@
 shadowsocks
 ===========
 
-[![Build Status](https://travis-ci.org/clowwindy/shadowsocks.png)](https://travis-ci.org/clowwindy/shadowsocks)
-Current version: 1.3.3
+[![PyPI version]][PyPI]
+[![Build Status]][Travis CI]
+[![Coverage Status]][Coverage]
 
-shadowsocks is a lightweight tunnel proxy which can help you get through firewalls.
+A fast tunnel proxy that helps you bypass firewalls.
 
-Other ports and clients can be found [here](https://github.com/clowwindy/shadowsocks/wiki/Ports-and-Clients).
+Features:
+- TCP & UDP support
+- User management API
+- TCP Fast Open
+- Workers and graceful restart
+- Destination IP blacklist
 
-[中文说明](https://github.com/clowwindy/shadowsocks/wiki/Shadowsocks-%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E)
+Server
+------
 
-Usage
------------
+### Install
 
-First, make sure you have Python 2.6 or 2.7.
+Debian / Ubuntu:
 
-    $ python --version
-    Python 2.6.8
-    
-Install Shadowsocks.
-
+    apt-get install python-pip
     pip install shadowsocks
-    
-Create a file named `config.json`, with the following content.
 
-    {
-        "server":"my_server_ip",
-        "server_port":8388,
-        "local_port":1080,
-        "password":"barfoo!",
-        "timeout":600,
-        "method":"table"
-    }
+CentOS:
 
-Explanation of the fields:
+    yum install python-setuptools && easy_install pip
+    pip install shadowsocks
 
-    server          your server IP (IPv4/IPv6), notice that your server will listen to this IP
-    server_port     server port
-    local_port      local port
-    password        a password used to encrypt transfer
-    timeout         in seconds
-    method          encryption method, "bf-cfb", "aes-256-cfb", "des-cfb", "rc4", etc. Default is table, which is not secure. "aes-256-cfb" is recommended
+Windows:
 
-`cd` into the directory of `config.json`. Run `ssserver` on your server. To run it in the background, run
-`nohup ssserver > log &`.
+See [Install Server on Windows]
 
-On your client machine, run `sslocal`.
+### Usage
 
-Change the proxy settings in your browser to
+    ssserver -p 443 -k password -m aes-256-cfb
 
-    protocol: socks5
-    hostname: 127.0.0.1
-    port:     your local_port
+To run in the background:
 
-**Notice: If you want to use encryption methods other than "table", please install M2Crypto (See Encryption Section).**
+    sudo ssserver -p 443 -k password -m aes-256-cfb --user nobody -d start
 
-It's recommended to use shadowsocks with AutoProxy or Proxy SwitchySharp.
+To stop:
 
-Command line args
-------------------
+    sudo ssserver -d stop
 
-You can use args to override settings from `config.json`.
+To check the log:
 
-    sslocal -s server_name -p server_port -l local_port -k password -m bf-cfb
-    ssserver -p server_port -k password -m bf-cfb
-    ssserver -c /etc/shadowsocks/config.json
+    sudo less /var/log/shadowsocks.log
 
-Encryption
-------------
+Check all the options via `-h`. You can also use a [Configuration] file
+instead.
 
-Default encryption method table, which is not secure, is not recommended. Please use "aes-256-cfb" or "bf-cfb". "rc4" is not secure, either, please don't use it.
+### Usage with Config File
 
-List of all encryption methods:
+[Create configeration file and run](https://github.com/shadowsocks/shadowsocks/wiki/Configuration-via-Config-File)
 
-- aes-128-cfb
-- aes-192-cfb
-- aes-256-cfb
-- bf-cfb
-- camellia-128-cfb
-- camellia-192-cfb
-- camellia-256-cfb
-- cast5-cfb
-- des-cfb
-- idea-cfb
-- rc2-cfb
-- rc4
-- seed-cfb
-- table
+To start:
 
-**If you want to use encryption method other than "table", please install [M2Crypto](http://chandlerproject.org/Projects/MeTooCrypto).**
+    ssserver -c /etc/shadowsocks.json
 
-Ubuntu:
 
-    apt-get install python-m2crypto
+Documentation
+-------------
 
-Others:
-
-    apt-get install openssl-dev swig
-    pip install M2Crypto
-
-Please notice that some encryption methods are not available on some environments.
-
-Performance
-------------
-
-You may want to install gevent for better performance.
-
-    $ sudo apt-get install python-gevent
-
-Or:
-
-    $ sudo apt-get install libevent-dev python-pip
-    $ sudo pip install gevent
+You can find all the documentation in the [Wiki].
 
 License
 -------
-MIT
 
-Bugs and Issues
-----------------
-Please visit [issue tracker](https://github.com/clowwindy/shadowsocks/issues?state=open)
+Apache License
 
-Mailing list: http://groups.google.com/group/shadowsocks
 
-Also see [troubleshooting](https://github.com/clowwindy/shadowsocks/wiki/Troubleshooting)
+
+
+
+
+
+[Build Status]:      https://img.shields.io/travis/shadowsocks/shadowsocks/master.svg?style=flat
+[Coverage Status]:   https://jenkins.shadowvpn.org/result/shadowsocks
+[Coverage]:          https://jenkins.shadowvpn.org/job/Shadowsocks/ws/PYENV/py34/label/linux/htmlcov/index.html
+[PyPI]:              https://pypi.python.org/pypi/shadowsocks
+[PyPI version]:      https://img.shields.io/pypi/v/shadowsocks.svg?style=flat
+[Travis CI]:         https://travis-ci.org/shadowsocks/shadowsocks
+
